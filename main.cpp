@@ -1,5 +1,6 @@
 #include <fstream>
 #include <map>
+#include <vector>
 
 #define _REALLY_INCLUDE_SYS__SYSTEM_PROPERTIES_H_
 #include <sys/_system_properties.h>
@@ -11,6 +12,12 @@ void property_override(char const prop[], char const value[], bool add = false) 
         __system_property_update(pi, value, strlen(value));
     } else if (add) {
         __system_property_add(prop, strlen(prop), value, strlen(value));
+    }
+}
+
+void property_override(const std::vector<std::string> &props, char const value[], bool add = false) {
+    for (const auto &prop : props) {
+        property_override(prop.c_str(), value, add);
     }
 }
 
@@ -34,10 +41,38 @@ std::map<std::string, std::string> load_config() {
     return config;
 }
 
-int main(int argc __unused, char *argv[] __unused) {
+std::vector<std::string> property_list(const std::string &prefix, const std::string &suffix) {
+    std::vector<std::string> props;
+
+    for (const std::string &part : {
+        "",
+        "bootimage.",
+        "odm_dlkm.",
+        "odm.",
+        "oem.",
+        "product.",
+        "system_ext.",
+        "system.",
+        "vendor_dlkm.",
+        "vendor.",
+    }) {
+        props.emplace_back(prefix + part + suffix);
+    }
+
+    return props;
+}
+
+int main(int argc, char *argv[]) {
     if (__system_properties_init()) {
         return -1;
     }
+
+    if (argc != 2) {
+        return -1;
+    }
+
+    const auto is_init_stage = strcmp(argv[1], "init") == 0;
+    const auto is_boot_completed_stage = strcmp(argv[1], "boot_completed") == 0;
 
     const auto config = load_config();
     const auto build_fingerprint = config.find("BUILD_FINGERPRINT");
@@ -47,99 +82,59 @@ int main(int argc __unused, char *argv[] __unused) {
     const auto build_type = config.find("BUILD_TYPE");
     const auto build_version_release = config.find("BUILD_VERSION_RELEASE");
     const auto debuggable = config.find("DEBUGGABLE");
+    const auto manufacturer_name = config.find("MANUFACTURER_NAME");
     const auto product_name = config.find("PRODUCT_NAME");
 
-    if (build_fingerprint != config.end()) {
-        for (const auto &prop : {
-            "ro.bootimage.build.fingerprint",
-            "ro.build.fingerprint",
-            "ro.odm.build.fingerprint",
-            "ro.product.build.fingerprint",
-            "ro.system.build.fingerprint",
-            "ro.system_ext.build.fingerprint",
-            "ro.vendor.build.fingerprint",
-        }) {
-            property_override(prop, build_fingerprint->second.c_str());
-        }
+    if (is_init_stage && build_fingerprint != config.end()) {
+        property_override(property_list("ro.", "build.fingerprint"),
+                build_fingerprint->second.c_str());
     }
 
-    if (build_tags != config.end()) {
-        for (const auto &prop : {
-            "ro.build.tags",
-            "ro.odm.build.tags",
-            "ro.product.build.tags",
-            "ro.system.build.tags",
-            "ro.system_ext.build.tags",
-            "ro.vendor.build.tags",
-        }) {
-            property_override(prop, build_tags->second.c_str());
-        }
+    if (is_init_stage && build_tags != config.end()) {
+        property_override(property_list("ro.", "build.tags"), build_tags->second.c_str());
     }
 
-    if (build_type != config.end()) {
-        for (const auto &prop : {
-            "ro.build.type",
-            "ro.odm.build.type",
-            "ro.product.build.type",
-            "ro.system.build.type",
-            "ro.system_ext.build.type",
-            "ro.vendor.build.type",
-        }) {
-            property_override(prop, build_type->second.c_str());
-        }
+    if (is_init_stage && build_type != config.end()) {
+        property_override(property_list("ro.", "build.type"), build_type->second.c_str());
     }
 
-    if (build_version_release != config.end()) {
-        for (const auto &prop : {
-            "ro.build.version.release",
-            "ro.odm.build.version.release",
-            "ro.product.build.version.release",
-            "ro.system.build.version.release",
-            "ro.system_ext.build.version.release",
-            "ro.vendor.build.version.release",
-            "ro.build.version.release_or_codename",
-            "ro.odm.build.version.release_or_codename",
-            "ro.product.build.version.release_or_codename",
-            "ro.system.build.version.release_or_codename",
-            "ro.system_ext.build.version.release_or_codename",
-            "ro.vendor.build.version.release_or_codename",
-        }) {
-            property_override(prop, build_version_release->second.c_str());
-        }
+    if (is_boot_completed_stage && build_version_release != config.end()) {
+        property_override(property_list("ro.", "build.version.release"),
+                build_version_release->second.c_str());
+        property_override(property_list("ro.", "build.version.release_or_codename"),
+                build_version_release->second.c_str());
     }
 
-    if (build_description != config.end()) {
+    if (is_init_stage && build_description != config.end()) {
         property_override("ro.build.description", build_description->second.c_str());
     }
 
-    if (build_security_patch_date != config.end()) {
+    if (is_boot_completed_stage && build_security_patch_date != config.end()) {
         property_override("ro.build.version.security_patch",
                 build_security_patch_date->second.c_str());
     }
 
-    if (debuggable != config.end()) {
+    if (is_init_stage && debuggable != config.end()) {
         property_override("ro.debuggable", debuggable->second.c_str());
     }
 
-    if (product_name != config.end()) {
-        for (const auto &prop : {
-            "ro.product.name",
-            "ro.product.odm.name",
-            "ro.product.product.name",
-            "ro.product.system.name",
-            "ro.product.system_ext.name",
-            "ro.product.vendor.name",
-        }) {
-            property_override(prop, product_name->second.c_str());
-        }
+    if (is_init_stage && manufacturer_name != config.end()) {
+        property_override(property_list("ro.product.", "manufacturer"),
+                manufacturer_name->second.c_str());
     }
 
-    property_override("ro.boot.flash.locked", "1");
-    property_override("ro.boot.vbmeta.device_state", "locked");
-    property_override("ro.boot.verifiedbootstate", "green");
-    property_override("ro.boot.veritymode", "enforcing");
-    property_override("ro.boot.warranty_bit", "0");
-    property_override("ro.warranty_bit", "0");
+    if (is_init_stage && product_name != config.end()) {
+        property_override(property_list("ro.product.", "name"), product_name->second.c_str());
+    }
+
+    if (is_boot_completed_stage) {
+        property_override("ro.boot.flash.locked", "1");
+        property_override("ro.boot.vbmeta.device_state", "locked");
+        property_override("ro.boot.verifiedbootstate", "green");
+        property_override("ro.boot.veritymode", "enforcing");
+        property_override("ro.boot.warranty_bit", "0");
+        property_override("ro.warranty_bit", "0");
+    }
 
     return 0;
 }
